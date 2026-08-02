@@ -49,17 +49,84 @@ int MagpieRT_Start(const MagpieRT_StartParams* params) {
 
 	ScalingOptions options;
 
-	// FSR 链: EASU 铺满目标, RCAS 锐化。与旧版 0.8.1 效果语义对齐。
-	EffectOption easu;
-	easu.name = "FSR\\FSR_EASU";
-	easu.scalingType = ScalingType::Fill;
-	EffectOption rcas;
-	rcas.name = "FSR\\FSR_RCAS";
 	float sharpness = params->sharpness;
 	if (sharpness < 0.0f) sharpness = 0.0f;
 	if (sharpness > 1.0f) sharpness = 1.0f;
-	rcas.parameters["sharpness"] = sharpness;
-	options.effects = { std::move(easu), std::move(rcas) };
+
+	int preset = params->effectPreset;
+	if (preset < 0 || preset >= MagpieRT_Effect_COUNT) {
+		preset = MagpieRT_Effect_FSR;
+	}
+
+	// 铺满目标的主效果; 自带 sharpness 参数的直接吃锐化值
+	auto makeFill = [](const char* name) {
+		EffectOption e;
+		e.name = name;
+		e.scalingType = ScalingType::Fill;
+		return e;
+	};
+	// 主效果没有锐化参数时补一道 RCAS(sharpness>0 才加)
+	auto appendRcas = [&](std::vector<EffectOption>& effects) {
+		if (sharpness > 0.0f) {
+			EffectOption rcas;
+			rcas.name = "FSR\\FSR_RCAS";
+			rcas.parameters["sharpness"] = sharpness;
+			effects.push_back(std::move(rcas));
+		}
+	};
+
+	switch (preset) {
+	case MagpieRT_Effect_Lanczos:
+	{
+		options.effects = { makeFill("Lanczos") };
+		appendRcas(options.effects);
+		break;
+	}
+	case MagpieRT_Effect_SGSR:
+	{
+		options.effects = { makeFill("SGSR") };
+		appendRcas(options.effects);
+		break;
+	}
+	case MagpieRT_Effect_NIS:
+	{
+		EffectOption nis = makeFill("NIS\\NIS");
+		nis.parameters["sharpness"] = sharpness;
+		options.effects = { std::move(nis) };
+		break;
+	}
+	case MagpieRT_Effect_CAS:
+	{
+		EffectOption cas = makeFill("CAS\\CAS_Scaling");
+		cas.parameters["sharpness"] = sharpness;
+		options.effects = { std::move(cas) };
+		break;
+	}
+	case MagpieRT_Effect_Anime4K:
+	{
+		// Anime4K_Upscale_S 固定 2x 输出, 再用 Bicubic 铺满目标
+		EffectOption anime;
+		anime.name = "Anime4K\\Anime4K_Upscale_S";
+		options.effects = { std::move(anime), makeFill("Bicubic") };
+		appendRcas(options.effects);
+		break;
+	}
+	case MagpieRT_Effect_Nearest:
+	{
+		// 像素风整数放大, 锐化只会破坏硬边缘, 不追加 RCAS
+		options.effects = { makeFill("Nearest") };
+		break;
+	}
+	case MagpieRT_Effect_FSR:
+	default:
+	{
+		EffectOption rcas;
+		rcas.name = "FSR\\FSR_RCAS";
+		rcas.parameters["sharpness"] = sharpness;
+		options.effects = { makeFill("FSR\\FSR_EASU"), std::move(rcas) };
+		break;
+	}
+	}
 
 	if (params->captureMethod >= 0 &&
 		params->captureMethod < (int)CaptureMethod::COUNT) {

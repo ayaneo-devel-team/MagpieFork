@@ -42,6 +42,20 @@ enum MagpieRT_Flags {
 	MagpieRT_Flag_DisableEffectCache = 0x400,
 };
 
+// Effect chain presets built from the bundled effects directory. Presets
+// without a built-in sharpness parameter get an FSR_RCAS pass appended when
+// sharpness > 0 (except Nearest, where sharpening defeats the point).
+enum MagpieRT_Effect {
+	MagpieRT_Effect_FSR = 0,       // FSR_EASU + FSR_RCAS(sharpness)
+	MagpieRT_Effect_Lanczos = 1,   // Lanczos + optional RCAS
+	MagpieRT_Effect_SGSR = 2,      // Snapdragon GSR + optional RCAS
+	MagpieRT_Effect_NIS = 3,       // NVIDIA Image Scaling (sharpness)
+	MagpieRT_Effect_CAS = 4,       // AMD CAS scaling (sharpness)
+	MagpieRT_Effect_Anime4K = 5,   // Anime4K_Upscale_S (2x) + Bicubic + optional RCAS
+	MagpieRT_Effect_Nearest = 6,   // nearest neighbour, for pixel-art titles
+	MagpieRT_Effect_COUNT,
+};
+
 struct MagpieRT_StartParams {
 	uint32_t structSize;        // = sizeof(MagpieRT_StartParams), ABI guard
 	HWND hwndSrc;
@@ -54,6 +68,7 @@ struct MagpieRT_StartParams {
 	float cursorScaling;        // <=0: same as source
 	int cursorInterpolationMode; // 0 nearest, 1 bilinear
 	int graphicsAdapterIdx;     // -1: default
+	int effectPreset;           // MagpieRT_Effect; out-of-range falls back to FSR
 };
 
 // logDir: directory for magpie-rt.log; NULL for current directory.
