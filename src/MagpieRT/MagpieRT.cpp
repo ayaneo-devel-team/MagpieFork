@@ -4,8 +4,13 @@
 #include <ScalingRuntime.h>
 #include <ScalingOptions.h>
 #include <Logger.h>
+#include <StrHelper.h>
 
 #include <atomic>
+#include <charconv>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 
 using namespace Magpie;
 
@@ -32,6 +37,166 @@ void HostShowError(HWND, ScalingError error) noexcept {
 }
 
 void HostSave(const ScalingOptions&, HWND) noexcept {}
+
+std::vector<std::wstring> SplitW(std::wstring_view text, wchar_t sep) {
+	std::vector<std::wstring> parts;
+	size_t begin = 0;
+	while (begin <= text.size()) {
+		size_t end = text.find(sep, begin);
+		if (end == std::wstring_view::npos) {
+			parts.emplace_back(text.substr(begin));
+			break;
+		}
+		parts.emplace_back(text.substr(begin, end - begin));
+		begin = end + 1;
+	}
+	return parts;
+}
+
+float ToFloat(const std::wstring& s, float fallback) {
+	try {
+		return s.empty() ? fallback : std::stof(s);
+	} catch (...) {
+		return fallback;
+	}
+}
+
+// 解析 optionsText(格式见 MagpieRT.h)。effect 行存在时整链替换 effectPreset。
+void ApplyOptionsText(ScalingOptions& options, const wchar_t* text) {
+	if (!text || !*text) {
+		return;
+	}
+
+	std::vector<EffectOption> chain;
+	for (const std::wstring& line : SplitW(text, L'\n')) {
+		if (line.empty()) {
+			continue;
+		}
+		std::vector<std::wstring> f = SplitW(line, L'|');
+		const std::wstring& kind = f[0];
+
+		if (kind == L"effect" && f.size() >= 2 && !f[1].empty()) {
+			EffectOption e;
+			e.name = StrHelper::UTF16ToUTF8(f[1]);
+			if (f.size() >= 3) {
+				int st = (int)ToFloat(f[2], 3.0f);
+				if (st >= 0 && st <= 3) {
+					e.scalingType = (ScalingType)st;
+				}
+			}
+			if (f.size() >= 5) {
+				e.scale = { ToFloat(f[3], 1.0f), ToFloat(f[4], 1.0f) };
+			}
+			if (f.size() >= 6 && !f[5].empty()) {
+				for (const std::wstring& kv : SplitW(f[5], L',')) {
+					size_t eq = kv.find(L'=');
+					if (eq != std::wstring::npos && eq > 0) {
+						e.parameters[StrHelper::UTF16ToUTF8(kv.substr(0, eq))] =
+							ToFloat(kv.substr(eq + 1), 0.0f);
+					}
+				}
+			}
+			chain.push_back(std::move(e));
+		} else if (kind == L"cropping" && f.size() >= 5) {
+			options.cropping = { ToFloat(f[1], 0.0f), ToFloat(f[2], 0.0f),
+			                     ToFloat(f[3], 0.0f), ToFloat(f[4], 0.0f) };
+		} else if (kind == L"dupframe" && f.size() >= 2) {
+			int mode = (int)ToFloat(f[1], 1.0f);
+			if (mode >= 0 && mode <= 2) {
+				options.duplicateFrameDetectionMode = (DuplicateFrameDetectionMode)mode;
+			}
+		} else if (kind == L"windowedscale" && f.size() >= 2) {
+			float factor = ToFloat(f[1], 0.0f);
+			if (factor >= 0.0f) {
+				options.initialWindowedScaleFactor = factor;
+			}
+		}
+	}
+
+	if (!chain.empty()) {
+		options.effects = std::move(chain);
+	}
+}
+
+// 枚举 effectsDir 下 .hlsl 头部声明的参数元数据, 供宿主生成设置界面
+std::wstring& ListEffectsBuffer() {
+	static std::wstring buffer;
+	return buffer;
+}
+
+void ParseEffectFile(const std::filesystem::path& file, const std::wstring& relName, std::wstring& out) {
+	std::ifstream stream(file);
+	if (!stream) {
+		return;
+	}
+
+	// 声明块前允许有描述注释, 在前若干行内找效果标记
+	std::string line;
+	bool isEffect = false;
+	for (int i = 0; i < 20 && std::getline(stream, line); ++i) {
+		if (line.find("//!MAGPIE EFFECT") != std::string::npos) {
+			isEffect = true;
+			break;
+		}
+	}
+	if (!isEffect) {
+		return;
+	}
+
+	std::wstring entry = relName;
+	// 参数块: //!PARAMETER + LABEL/DEFAULT/MIN/MAX/STEP, 随后的变量声明行是参数名
+	bool inParam = false;
+	std::string label, def, minV, maxV, step;
+	int lineCount = 0;
+	while (std::getline(stream, line) && ++lineCount < 300) {
+		auto value = [&](const char* prefix) -> std::string {
+			size_t len = strlen(prefix);
+			if (line.compare(0, len, prefix) != 0) {
+				return {};
+			}
+			size_t begin = line.find_first_not_of(' ', len);
+			return begin == std::string::npos ? std::string() : line.substr(begin);
+		};
+
+		if (line.rfind("//!PASS", 0) == 0) {
+			break; // 参数都在 PASS 之前
+		}
+		if (line.rfind("//!PARAMETER", 0) == 0) {
+			inParam = true;
+			label = def = minV = maxV = step = {};
+			continue;
+		}
+		if (!inParam) {
+			continue;
+		}
+		if (std::string v = value("//!LABEL"); !v.empty()) { label = v; continue; }
+		if (std::string v = value("//!DEFAULT"); !v.empty()) { def = v; continue; }
+		if (std::string v = value("//!MIN"); !v.empty()) { minV = v; continue; }
+		if (std::string v = value("//!MAX"); !v.empty()) { maxV = v; continue; }
+		if (std::string v = value("//!STEP"); !v.empty()) { step = v; continue; }
+		if (line.rfind("//!", 0) == 0) {
+			continue; // 其他声明(如紧随的下一个 PARAMETER 前缀行)
+		}
+
+		// 参数块后的第一个非声明行应是 "float name;" 变量声明
+		size_t typeEnd = line.find("float ");
+		if (typeEnd != std::string::npos) {
+			size_t nameBegin = typeEnd + 6;
+			size_t nameEnd = line.find(';', nameBegin);
+			if (nameEnd != std::string::npos) {
+				std::string name = line.substr(nameBegin, nameEnd - nameBegin);
+				while (!name.empty() && name.back() == ' ') name.pop_back();
+				std::string meta = name + ":" + label + ":" + def + ":" + minV + ":" + maxV + ":" + step;
+				// 元数据里的分隔符不允许出现在字段内, label 若含冒号会破坏格式, 替换掉
+				entry += L"|" + StrHelper::UTF8ToUTF16(meta);
+			}
+		}
+		inParam = false;
+	}
+
+	out += entry;
+	out += L"\n";
+}
 
 } // namespace
 
@@ -189,6 +354,11 @@ int MagpieRT_Start(const MagpieRT_StartParams* params) {
 	// 截图功能不经宿主暴露, 但成员不允许为空
 	options.screenshotsDir = L".";
 
+	// 扩展选项(自定义效果链/裁剪/重复帧检测/初始窗口化倍率)
+	if (params->structSize >= sizeof(MagpieRT_StartParams)) {
+		ApplyOptionsText(options, params->optionsText);
+	}
+
 	g_lastError = 0;
 	const bool ok = Runtime().Start(
 		params->hwndSrc, std::move(options),
@@ -212,6 +382,39 @@ void MagpieRT_ToggleScaling(BOOL windowedMode) {
 
 int MagpieRT_GetLastError(void) {
 	return g_lastError;
+}
+
+const wchar_t* MagpieRT_ListEffects(const wchar_t* effectsDir) {
+	if (!effectsDir || !*effectsDir) {
+		return nullptr;
+	}
+
+	std::error_code ec;
+	std::filesystem::path root(effectsDir);
+	if (!std::filesystem::is_directory(root, ec)) {
+		return nullptr;
+	}
+
+	std::wstring& buffer = ListEffectsBuffer();
+	buffer.clear();
+
+	for (auto it = std::filesystem::recursive_directory_iterator(root, ec);
+	     it != std::filesystem::recursive_directory_iterator(); it.increment(ec)) {
+		if (ec || !it->is_regular_file(ec)) {
+			continue;
+		}
+		const std::filesystem::path& p = it->path();
+		if (p.extension() != L".hlsl") {
+			continue;
+		}
+		std::wstring rel = std::filesystem::relative(p, root, ec).replace_extension().native();
+		if (ec) {
+			continue;
+		}
+		ParseEffectFile(p, rel, buffer);
+	}
+
+	return buffer.c_str();
 }
 
 BOOL APIENTRY DllMain(HMODULE, DWORD reason, LPVOID) {

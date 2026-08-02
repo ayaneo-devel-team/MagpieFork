@@ -70,6 +70,15 @@ struct MagpieRT_StartParams {
 	int cursorInterpolationMode; // 0 nearest, 1 bilinear
 	int graphicsAdapterIdx;     // -1: default
 	int effectPreset;           // MagpieRT_Effect; out-of-range falls back to FSR
+
+	// Optional extended options: '\n'-separated lines, NULL for none.
+	// When at least one "effect" line is present, the listed chain replaces
+	// effectPreset entirely (order = pass order).
+	//   effect|<relName>|<scalingType 0 normal|1 fit|2 absolute|3 fill>|<scaleX>|<scaleY>|<k=v[,k=v...]>
+	//   cropping|<left>|<top>|<right>|<bottom>      source pixels
+	//   dupframe|<0 always|1 dynamic|2 never>       duplicate frame detection
+	//   windowedscale|<factor>                      initial windowed scale, 0 = auto
+	const wchar_t* optionsText;
 };
 
 // logDir: directory for magpie-rt.log; NULL for current directory.
@@ -89,3 +98,10 @@ MAGPIERT_API void MagpieRT_ToggleScaling(BOOL windowedMode);
 // returned 0 reports its Magpie::ScalingError here (0 = no error). Reset by
 // the next MagpieRT_Start call.
 MAGPIERT_API int MagpieRT_GetLastError(void);
+
+// Enumerates effect metadata parsed from the .hlsl headers under effectsDir.
+// Returns '\n'-separated lines (valid until the next call, not thread safe):
+//   <relName>|<param>:<label>:<default>:<min>:<max>:<step>|...
+// relName uses '\' separators without the .hlsl suffix. Returns NULL when the
+// directory cannot be enumerated.
+MAGPIERT_API const wchar_t* MagpieRT_ListEffects(const wchar_t* effectsDir);
