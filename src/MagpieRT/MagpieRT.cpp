@@ -5,11 +5,14 @@
 #include <ScalingOptions.h>
 #include <Logger.h>
 
+#include <atomic>
+
 using namespace Magpie;
 
 namespace {
 
 ScalingRuntime* g_runtime = nullptr;
+std::atomic<int> g_lastError{ 0 };
 
 ScalingRuntime& Runtime() {
 	if (!g_runtime) {
@@ -17,6 +20,18 @@ ScalingRuntime& Runtime() {
 	}
 	return *g_runtime;
 }
+
+// ScalingOptions 的回调是裸函数指针且默认 nullptr, ScalingWindow 在
+// Release 下不做判空, 宿主必须全部提供, 否则启动失败路径会调用空指针。
+void HostShowToast(HWND, std::wstring_view) noexcept {}
+
+void HostShowError(HWND, ScalingError error) noexcept {
+	g_lastError = (int)error;
+	Logger::Get().Error(fmt::format("scaling session failed, error: {}", (int)error));
+	Logger::Get().Flush();
+}
+
+void HostSave(const ScalingOptions&, HWND) noexcept {}
 
 } // namespace
 
@@ -95,6 +110,13 @@ int MagpieRT_Start(const MagpieRT_StartParams* params) {
 	options.fullscreenInitialToolbarState = ToolbarState::Off;
 	options.windowedInitialToolbarState = ToolbarState::Off;
 
+	options.showToast = HostShowToast;
+	options.showError = HostShowError;
+	options.save = HostSave;
+	// 截图功能不经宿主暴露, 但成员不允许为空
+	options.screenshotsDir = L".";
+
+	g_lastError = 0;
 	const bool ok = Runtime().Start(
 		params->hwndSrc, std::move(options),
 		/*force*/ (params->flags & MagpieRT_Flag_SimulateExclusiveFullscreen) != 0);
@@ -113,6 +135,10 @@ int MagpieRT_GetState(void) {
 
 void MagpieRT_ToggleScaling(BOOL windowedMode) {
 	Runtime().ToggleScaling(windowedMode != FALSE);
+}
+
+int MagpieRT_GetLastError(void) {
+	return g_lastError;
 }
 
 BOOL APIENTRY DllMain(HMODULE, DWORD reason, LPVOID) {

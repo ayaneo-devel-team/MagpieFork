@@ -68,3 +68,8 @@ MAGPIERT_API void MagpieRT_Stop(void);
 MAGPIERT_API int MagpieRT_GetState(void);
 
 MAGPIERT_API void MagpieRT_ToggleScaling(BOOL windowedMode);
+
+// Scaling runs asynchronously; a session that fails after MagpieRT_Start
+// returned 0 reports its Magpie::ScalingError here (0 = no error). Reset by
+// the next MagpieRT_Start call.
+MAGPIERT_API int MagpieRT_GetLastError(void);
