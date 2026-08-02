@@ -1,0 +1,95 @@
+name: Runtime release
+
+# Builds the MagpieRT host-embedding runtime (MagpieRT2.dll), packages it with
+# the effects directory and LICENSE, and attaches the archive plus an md5
+# sidecar to a GitHub release for the pushed runtime-v* tag.
+
+on:
+  push:
+    tags: [ 'runtime-v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v7
+
+    - uses: actions/setup-python@v7
+      with:
+        python-version: '3.13'
+
+    - uses: microsoft/setup-msbuild@v2
+
+    - name: Setup Conan
+      run: |
+        pip install conan
+        conan profile detect --force
+
+    - name: Load Conan cache
+      uses: actions/cache@v6
+      with:
+        path: ~/.conan2/p
+        key: Conan-runtime-${{ hashFiles('src/**/conanfile.txt') }}-x64
+
+    - name: Restore NuGet packages
+      run: |
+        nuget restore src\Magpie.Core\packages.config -SolutionDirectory .
+        nuget restore src\MagpieRT\packages.config -SolutionDirectory .
+
+    - name: Build Conan dependencies
+      run: msbuild src\_ConanDeps\_ConanDeps.vcxproj /p:Configuration=Release /p:Platform=x64 "/p:SolutionDir=$env:GITHUB_WORKSPACE\" /m /v:m
+
+    - name: Build MagpieRT
+      run: msbuild src\MagpieRT\MagpieRT.vcxproj /p:Configuration=Release /p:Platform=x64 "/p:SolutionDir=$env:GITHUB_WORKSPACE\" /m /v:m
+
+    - name: Package runtime
+      id: package
+      run: |
+        $version = "${{ github.ref_name }}" -replace '^runtime-v', ''
+        if ($version -eq "${{ github.ref_name }}") { $version = 'dev' }
+        $zipName = "magpie-runtime-$version.zip"
+
+        $staging = 'runtime-staging'
+        New-Item -ItemType Directory -Force (Join-Path $staging 'effects') | Out-Null
+        Copy-Item bin\x64\Release\MagpieRT2.dll $staging
+        Copy-Item src\Effects\* (Join-Path $staging 'effects') -Recurse
+        Get-ChildItem (Join-Path $staging 'effects') -Recurse -Include *.vcxproj, *.filters | Remove-Item
+        Copy-Item LICENSE $staging
+
+        Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $zipName
+        $md5 = (Get-FileHash $zipName -Algorithm MD5).Hash.ToLowerInvariant()
+        Set-Content -Path "$zipName.md5" -Value $md5 -Encoding ascii -NoNewline
+
+        echo "zip=$zipName" >> $env:GITHUB_OUTPUT
+        echo "md5=$md5" >> $env:GITHUB_OUTPUT
+
+    - name: Store artifacts
+      uses: actions/upload-artifact@v7
+      with:
+        name: magpie-runtime
+        path: |
+          ${{ steps.package.outputs.zip }}
+          ${{ steps.package.outputs.zip }}.md5
+
+    - name: Publish release
+      if: startsWith(github.ref, 'refs/tags/runtime-v')
+      uses: softprops/action-gh-release@v2
+      with:
+        name: MagpieRT runtime ${{ github.ref_name }}
+        body: |
+          C ABI wrapper (MagpieRT2.dll) around Magpie.Core for embedding the
+          scaling runtime in external host applications, bundled with the
+          effects shader directory required at runtime.
+
+          Assets:
+          - `${{ steps.package.outputs.zip }}` — MagpieRT2.dll + effects + LICENSE
+          - `${{ steps.package.outputs.zip }}.md5` — md5 checksum (lowercase hex, single line): `${{ steps.package.outputs.md5 }}`
+
+          Licensed under GPL-3.0. Built by CI from the source at this tag.
+        files: |
+          ${{ steps.package.outputs.zip }}
+          ${{ steps.package.outputs.zip }}.md5
