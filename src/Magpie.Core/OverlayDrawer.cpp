@@ -225,8 +225,16 @@ void OverlayDrawer::UpdateAfterActiveEffectsChanged() noexcept {
 static const std::wstring& GetAppLanguage() noexcept {
 	static std::wstring language;
 	if (language.empty()) {
-		winrt::ResourceContext resourceContext = winrt::ResourceContext::GetForViewIndependentUse();
-		language = resourceContext.QualifierValues().Lookup(L"Language");
+		if (Win32Helper::HasAppResources()) {
+			winrt::ResourceContext resourceContext = winrt::ResourceContext::GetForViewIndependentUse();
+			language = resourceContext.QualifierValues().Lookup(L"Language");
+		} else {
+			// 没有应用资源时 MRM 不可用，退回用户区域设置
+			wchar_t buf[LOCALE_NAME_MAX_LENGTH]{};
+			if (GetUserDefaultLocaleName(buf, LOCALE_NAME_MAX_LENGTH) > 0) {
+				language = buf;
+			}
+		}
 		StrHelper::ToLowerCase(language);
 	}
 	return language;

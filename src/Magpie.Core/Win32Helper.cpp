@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Win32Helper.h"
 #include "StrHelper.h"
+#include <appmodel.h>
 #include <dcomp.h>
 #include <dwmapi.h>
 #include <io.h>
@@ -391,6 +392,17 @@ bool Win32Helper::FileExists(const wchar_t* fileName) noexcept {
 bool Win32Helper::DirExists(const wchar_t* fileName) noexcept {
 	DWORD attrs = GetFileAttributes(fileName);
 	return (attrs != INVALID_FILE_ATTRIBUTES) && (attrs & FILE_ATTRIBUTE_DIRECTORY);
+}
+
+bool Win32Helper::HasAppResources() noexcept {
+	static const bool result = []() {
+		UINT32 length = 0;
+		if (GetCurrentPackageFullName(&length, nullptr) != APPMODEL_ERROR_NO_PACKAGE) {
+			return true;
+		}
+		return FileExists((GetExePath().parent_path() / L"resources.pri").c_str());
+	}();
+	return result;
 }
 
 bool Win32Helper::CreateDir(const std::wstring& path, bool recursive) noexcept {

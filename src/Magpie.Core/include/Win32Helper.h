@@ -68,6 +68,11 @@ struct Win32Helper {
 
 	static bool DirExists(const wchar_t* fileName) noexcept;
 
+	// 进程是否有应用资源索引（打包应用或程序目录存在 resources.pri）。
+	// 没有时任何 MRM 调用（ResourceLoader/ResourceContext）都会以无法恢复的
+	// 方式失败，调用方必须先用它探测
+	static bool HasAppResources() noexcept;
+
 	// 相比 wil::CreateDirectoryDeepNoThrow 支持相对路径而且更快
 	static bool CreateDir(const std::wstring& path, bool recursive = false) noexcept;
 

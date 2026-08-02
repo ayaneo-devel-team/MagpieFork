@@ -31,8 +31,7 @@ static bool IsTopmostWindow(HWND hWnd) noexcept {
 	return GetWindowExStyle(hWnd) & WS_EX_TOPMOST;
 }
 
-ScalingWindow::ScalingWindow() noexcept :
-	_resourceLoader(winrt::ResourceLoader::GetForViewIndependentUse(CommonSharedConstants::APP_RESOURCE_MAP_ID)) {}
+ScalingWindow::ScalingWindow() noexcept {}
 
 ScalingWindow::~ScalingWindow() noexcept {}
 
@@ -421,7 +420,30 @@ void ScalingWindow::CleanAfterSrcRepositioned() noexcept {
 }
 
 winrt::hstring ScalingWindow::GetLocalizedString(std::wstring_view resName) const {
-	return _resourceLoader.GetString(resName);
+	if (!_resourceLoaderInitialized) {
+		_resourceLoaderInitialized = true;
+
+		// 没有应用资源（未打包且程序目录无 resources.pri）时 MRM 会以无法恢复的
+		// 方式失败，必须先探测再初始化。作为库嵌入其他进程时通常就处于这种环境
+		if (Win32Helper::HasAppResources()) {
+			try {
+				_resourceLoader = winrt::ResourceLoader::GetForViewIndependentUse(
+					CommonSharedConstants::APP_RESOURCE_MAP_ID);
+			} catch (...) {
+			}
+		}
+	}
+
+	if (!_resourceLoader) {
+		// 没有本地化资源时退回资源名，保证缩放功能本身仍然可用
+		return winrt::hstring(resName);
+	}
+
+	try {
+		return _resourceLoader.GetString(resName);
+	} catch (...) {
+		return winrt::hstring(resName);
+	}
 }
 
 LRESULT ScalingWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) noexcept {

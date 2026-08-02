@@ -183,7 +183,10 @@ private:
 
 	class SrcTracker _srcTracker;
 
-	winrt::ResourceLoader _resourceLoader{ nullptr };
+	// 惰性初始化：宿主没有应用资源（未打包且无 resources.pri）时 MRM 会抛出
+	// 无法恢复的异常，不能在 noexcept 构造函数里初始化
+	mutable winrt::ResourceLoader _resourceLoader{ nullptr };
+	mutable bool _resourceLoaderInitialized = false;
 
 	wil::unique_mutex_nothrow _exclModeMutex;
 
