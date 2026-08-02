@@ -77,6 +77,8 @@ void ApplyOptionsText(ScalingOptions& options, const wchar_t* text) {
 
 		if (kind == L"effect" && f.size() >= 2 && !f[1].empty()) {
 			EffectOption e;
+			// 名称允许用 '/' 书写, 统一还原为效果编译器期望的 '\\'
+			std::replace(f[1].begin(), f[1].end(), L'/', L'\\');
 			e.name = StrHelper::UTF16ToUTF8(f[1]);
 			if (f.size() >= 3) {
 				int st = (int)ToFloat(f[2], 3.0f);
@@ -411,6 +413,8 @@ const wchar_t* MagpieRT_ListEffects(const wchar_t* effectsDir) {
 		if (ec) {
 			continue;
 		}
+		// 名称统一用 '/' 分隔, 避免宿主链路上反斜杠被各层转义损坏
+		std::replace(rel.begin(), rel.end(), L'\\', L'/');
 		ParseEffectFile(p, rel, buffer);
 	}
 
