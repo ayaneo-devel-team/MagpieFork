@@ -117,6 +117,12 @@ int MagpieRT_Start(const MagpieRT_StartParams* params) {
 		options.effects = { makeFill("Nearest") };
 		break;
 	}
+	case MagpieRT_Effect_CRTGeom:
+	{
+		// 球面显像管复古效果(默认曲率开启); 锐化会破坏扫描线与荫罩质感, 不追加 RCAS
+		options.effects = { makeFill("CRT\\CRT_Geom") };
+		break;
+	}
 	case MagpieRT_Effect_FSR:
 	default:
 	{

@@ -53,6 +53,7 @@ enum MagpieRT_Effect {
 	MagpieRT_Effect_CAS = 4,       // AMD CAS scaling (sharpness)
 	MagpieRT_Effect_Anime4K = 5,   // Anime4K_Upscale_S (2x) + Bicubic + optional RCAS
 	MagpieRT_Effect_Nearest = 6,   // nearest neighbour, for pixel-art titles
+	MagpieRT_Effect_CRTGeom = 7,   // curved-tube retro CRT (scanlines, phosphor mask)
 	MagpieRT_Effect_COUNT,
 };
 
