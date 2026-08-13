@@ -86,6 +86,10 @@ MAGPIERT_API void MagpieRT_Initialize(const wchar_t* logDir);
 
 // Starts scaling. Returns 0 on success, otherwise a Magpie::ScalingError value
 // (>0) or -1 for invalid arguments. Asynchronous: poll MagpieRT_GetState().
+// Effects and cache files are resolved relative to the process current
+// directory (effects\*.hlsl, cache\). The host must keep CWD at the runtime
+// directory until the session is Scaling or has returned to Idle; restoring
+// CWD immediately after this call returns causes compile to miss the shaders.
 MAGPIERT_API int MagpieRT_Start(const MagpieRT_StartParams* params);
 
 MAGPIERT_API void MagpieRT_Stop(void);
